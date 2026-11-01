@@ -14,9 +14,25 @@ app.get("/",(req, res) =>  {
 res.send("Hello World!")
 })
 
-app.get ("/test", (req, res) => {
-    res.json({ massage: "Test Api"})
-})
+
+const client = new MongoClient(process.env.MONGO_URI);
+
+export async function connectToMongoDB() {
+  try {
+    await client.connect();
+    console.log("You successfully connected to MongoDB!");
+    return client;
+  } catch (err) {
+    console.dir(err);
+  }
+}
+
+
+connectToMongoDB()
+
+export async function disconnectFromMongoDB() {
+  await client.close();
+}
 
 
 app.listen(PORT, ()=> {
