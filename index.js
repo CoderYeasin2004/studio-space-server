@@ -31,6 +31,7 @@ export async function connectToMongoDB() {
 const connectClient = await connectToMongoDB();
 const db = connectClient.db("studio-space-server");
 const studiosCollection = db.collection("studios");
+const studioBookingCollection = db.collection("bookings")
 
 app.post("/studios", async(req, res) => {
     const studioData = req.body;
@@ -39,11 +40,37 @@ app.post("/studios", async(req, res) => {
 
     res.send(result)
 })
-// app.get("/studios/:slug", async(req, res) => {
-// const slug = req.params.slug;
-// console.log(slug, 'slug')
-// res.send({massage: `Your requested studio with slug: ${slug}`})
-// })
+app.get("/studios/booking", async (req, res) => {
+  try {
+    const bookings = await studioBookingCollection.find({}).toArray();
+
+    res.send(
+      bookings.map(({ _id, ...booking }) => ({
+        ...booking,
+        id: _id.toString(),
+      }))
+    );
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: "Failed to fetch bookings" });
+  }
+});
+
+app.post("/studios/booking", async (req, res) => {
+  try {
+    const bookingData = req.body;
+
+    const result = await studioBookingCollection.insertOne({
+      ...bookingData,
+      createdAt: new Date(),
+    });
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Booking failed" });
+  }
+});
+
 app.get("/studios/:slug", async (req, res) => {
   try {
     const { slug } = req.params;
