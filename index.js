@@ -38,13 +38,15 @@ const db = connectClient.db("studio-space-server");
 const studiosCollection = db.collection("studios");
 const studioBookingCollection = db.collection("bookings")
 
-app.post("/studios", async(req, res) => {
-    const studioData = req.body;
+app.post("/studios", async (req, res) => {
+  const result = await studiosCollection.insertOne({
+    ...req.body,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
 
-    const result = await studiosCollection.insertOne(studioData)
-
-    res.send(result)
-})
+  res.send(result);
+});
 
 
 app.get("/my-studios/:email", async (req, res) => {
@@ -108,6 +110,8 @@ app.delete("/studios/booking/:id", async (req, res) => {
   res.send(result);
 });
 
+
+
 app.patch("/studios/booking/:id/confirm", async (req, res) => {
   const { id } = req.params;
 
@@ -117,7 +121,12 @@ app.patch("/studios/booking/:id/confirm", async (req, res) => {
 
   const result = await studioBookingCollection.updateOne(
     { _id: new ObjectId(id), status: "pending" },
-    { $set: { status: "confirmed" } }
+    {
+      $set: {
+        status: "confirmed",
+        confirmedAt: new Date(),
+      },
+    }
   );
 
   if (!result.matchedCount) {
@@ -144,17 +153,24 @@ app.get("/studios/booking", async (req, res) => {
 });
 
 app.patch("/studios/:id", async (req, res) => {
-  const id = req.params.id;
-  const updatedData = req.body;
+  const { id } = req.params;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).send({ message: "Invalid ID" });
+  }
 
   const result = await studiosCollection.updateOne(
     { _id: new ObjectId(id) },
-    { $set: updatedData }
+    {
+      $set: {
+        ...req.body,
+        updatedAt: new Date(),
+      },
+    }
   );
 
   res.send(result);
 });
-
 app.delete("/studios/:id", async (req, res) => {
   const { id } = req.params;
 
