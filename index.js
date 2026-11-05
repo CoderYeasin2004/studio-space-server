@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { MongoClient } from 'mongodb';
+import { MongoClient, ObjectId } from 'mongodb';
 import 'dotenv/config'
 
 
@@ -74,6 +74,24 @@ app.get("/studios/booking", async (req, res) => {
   }
 });
 
+app.patch("/studios/:id", async (req, res) => {
+  const id = req.params.id;
+  const updatedData = req.body;
+
+  const result = await studiosCollection.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: updatedData }
+  );
+
+  res.send(result);
+});
+
+app.delete("/studios/:id", async(req, res) => {
+  const slug = req.params.slug;
+  const result = await studiosCollection.deleteOne({ _id: new ObjectId(id) });
+  res.send(result)
+})
+
 app.post("/studios/booking", async (req, res) => {
   try {
     const bookingData = req.body;
@@ -110,6 +128,8 @@ app.get("/studios/:slug", async (req, res) => {
     });
   }
 });
+
+
 
 app.get("/studios", async (req, res) => {
 const result = await studiosCollection.find().toArray();
