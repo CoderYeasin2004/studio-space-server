@@ -54,7 +54,12 @@ app.get("/my-studios/:email", async (req, res) => {
     .find({ creatorEmail: email })
     .toArray();
 
-  res.send(result);
+  res.send(
+    result.map((studio) => ({
+      ...studio,
+      id: studio._id.toString(),
+    }))
+  );
 });
 
 
@@ -115,7 +120,13 @@ app.get("/studios/:slug", async (req, res) => {
   try {
     const { slug } = req.params;
 
-    const studio = await studiosCollection.findOne({ slug });
+    const isObjectId = /^[0-9a-fA-F]{24}$/.test(slug);
+
+    const filter = isObjectId
+      ? { _id: new ObjectId(slug) }
+      : { slug };
+
+    const studio = await studiosCollection.findOne(filter);
 
     if (!studio) {
       return res.status(404).send({
@@ -123,16 +134,16 @@ app.get("/studios/:slug", async (req, res) => {
       });
     }
 
-    res.send(studio);
-  } catch (error) {
-    console.error("Failed to fetch studio:", error);
-
+    res.send({
+      ...studio,
+      id: studio._id.toString(),
+    });
+  } catch {
     res.status(500).send({
       message: "Internal server error",
     });
   }
 });
-
 
 
 app.get("/studios", async (req, res) => {
