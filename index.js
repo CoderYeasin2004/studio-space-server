@@ -80,6 +80,24 @@ app.delete("/studios/booking/:id", async (req, res) => {
   res.send(result);
 });
 
+app.patch("/studios/booking/:id/confirm", async (req, res) => {
+  const { id } = req.params;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).send({ message: "Invalid ID" });
+  }
+
+  const result = await studioBookingCollection.updateOne(
+    { _id: new ObjectId(id), status: "pending" },
+    { $set: { status: "confirmed" } }
+  );
+
+  if (!result.matchedCount) {
+    return res.status(404).send({ message: "Booking not found" });
+  }
+
+  res.send(result);
+});
 
 app.get("/studios/booking", async (req, res) => {
   try {
