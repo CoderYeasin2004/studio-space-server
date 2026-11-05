@@ -7,7 +7,12 @@ import 'dotenv/config'
 const PORT = process.env.PORT || 5000;
 
 const app = express()
-app.use(cors(["http://localhost:3000"]))
+app.use(
+  cors({
+    origin: "http://localhost:3000",
+    credentials: true,
+  })
+);
 app.use(express.json())
 
 app.get("/",(req, res) =>  {
@@ -40,6 +45,19 @@ app.post("/studios", async(req, res) => {
 
     res.send(result)
 })
+
+
+app.get("/my-studios/:email", async (req, res) => {
+  const email = req.params.email;
+
+  const result = await studiosCollection
+    .find({ creatorEmail: email })
+    .toArray();
+
+  res.send(result);
+});
+
+
 app.get("/studios/booking", async (req, res) => {
   try {
     const bookings = await studioBookingCollection.find({}).toArray();
