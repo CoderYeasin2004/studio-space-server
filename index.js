@@ -62,6 +62,34 @@ app.get("/my-studios/:email", async (req, res) => {
   );
 });
 
+app.get("/my-studio-bookings/:email", async (req, res) => {
+  const { email } = req.params;
+
+  const studios = await studiosCollection
+    .find({ creatorEmail: email })
+    .project({ _id: 1, slug: 1 })
+    .toArray();
+
+  const studioIds = studios.map((studio) => studio._id.toString());
+  const studioSlugs = studios.map((studio) => studio.slug).filter(Boolean);
+
+  const bookings = await studioBookingCollection
+    .find({
+      $or: [
+        { studioId: { $in: studioIds } },
+        { studioSlug: { $in: studioSlugs } },
+      ],
+    })
+    .toArray();
+
+  res.send(
+    bookings.map(({ _id, ...booking }) => ({
+      ...booking,
+      id: _id.toString(),
+    }))
+  );
+});
+
 app.delete("/studios/booking/:id", async (req, res) => {
   const { id } = req.params;
 
