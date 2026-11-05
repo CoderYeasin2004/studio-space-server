@@ -92,13 +92,22 @@ app.patch("/studios/:id", async (req, res) => {
 });
 
 app.delete("/studios/:id", async (req, res) => {
-  const id = req.params.id;
+  const { id } = req.params;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).send({
+      message: "Invalid studio ID",
+    });
+  }
 
   const result = await studiosCollection.deleteOne({
     _id: new ObjectId(id),
   });
 
-  res.send(result);
+  res.send({
+    acknowledged: result.acknowledged,
+    deletedCount: result.deletedCount,
+  });
 });
 
 app.post("/studios/booking", async (req, res) => {
