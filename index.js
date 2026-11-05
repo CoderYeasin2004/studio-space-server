@@ -62,6 +62,24 @@ app.get("/my-studios/:email", async (req, res) => {
   );
 });
 
+app.delete("/studios/booking/:id", async (req, res) => {
+  const { id } = req.params;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).send({ message: "Invalid booking ID" });
+  }
+
+  const result = await studioBookingCollection.deleteOne({
+    _id: new ObjectId(id),
+  });
+
+  if (!result.deletedCount) {
+    return res.status(404).send({ message: "Booking not found" });
+  }
+
+  res.send(result);
+});
+
 
 app.get("/studios/booking", async (req, res) => {
   try {
@@ -111,18 +129,108 @@ app.delete("/studios/:id", async (req, res) => {
 });
 
 app.post("/studios/booking", async (req, res) => {
-  try {
-    const bookingData = req.body;
+  const { studioId, date, startTime, endTime } = req.body;
 
-    const result = await studioBookingCollection.insertOne({
-      ...bookingData,
-      createdAt: new Date(),
+  // Validate booking
+  const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+  if (
+    !ObjectId.isValid(studioId) ||
+    !date ||
+    !timePattern.test(startTime) ||
+    !timePattern.test(endTime) ||
+    startTime >= endTime
+  ) {
+    return res.status(400).send({ message: "Invalid booking details" });
+  }
+
+  const session = client.startSession();
+
+  try {
+    await session.withTransaction(async () => {
+      // Lock the studio to prevent simultaneous bookings
+      const lock = await studiosCollection.updateOne(
+        { _id: new ObjectId(studioId), status: "live" },
+        { $inc: { bookingVersion: 1 } },
+        { session }
+      );
+
+      if (!lock.matchedCount) {
+        throw new Error("STUDIO_NOT_FOUND");
+      }
+
+      // Check existing booking
+      const existing = await studioBookingCollection.findOne(
+        {
+          studioId,
+          date,
+          status: { $in: ["pending", "confirmed"] },
+          startTime: { $lt: endTime },
+          endTime: { $gt: startTime },
+        },
+        { session }
+      );
+
+      if (existing) {
+        throw new Error("BOOKING_EXISTS");
+      }
+
+      // Save booking
+      await studioBookingCollection.insertOne(
+        {
+          ...req.body,
+          status: "pending",
+          createdAt: new Date(),
+        },
+        { session }
+      );
     });
 
-    res.send(result);
+    res.status(201).send({ message: "Booking successful" });
+
   } catch (error) {
+    if (error.message === "BOOKING_EXISTS") {
+      return res.status(409).send({
+        message: "This time slot is already booked",
+      });
+    }
+
+    if (error.message === "STUDIO_NOT_FOUND") {
+      return res.status(404).send({
+        message: "Studio not available",
+      });
+    }
+
     res.status(500).send({ message: "Booking failed" });
+
+  } finally {
+    await session.endSession();
   }
+});
+
+app.get("/studios/:id/availability", async (req, res) => {
+  const { id } = req.params;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).send({
+      message: "Invalid studio ID",
+    });
+  }
+
+  const bookings = await studioBookingCollection
+    .find({
+      studioId: id,
+      status: { $in: ["pending", "confirmed"] },
+    })
+    .project({
+      _id: 0,
+      date: 1,
+      startTime: 1,
+      endTime: 1,
+    })
+    .toArray();
+
+  res.send(bookings);
 });
 
 app.get("/studios/:slug", async (req, res) => {
