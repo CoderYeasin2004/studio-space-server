@@ -171,6 +171,8 @@ app.patch("/studios/:id", async (req, res) => {
 
   res.send(result);
 });
+
+
 app.delete("/studios/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -295,6 +297,47 @@ app.get("/studios/:id/availability", async (req, res) => {
   res.send(bookings);
 });
 
+app.patch("/studios/booking/:id/complete", async (req, res) => {
+  const { id } = req.params;
+
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).send({ message: "Invalid ID" });
+  }
+
+  const booking = await studioBookingCollection.findOne({
+    _id: new ObjectId(id),
+  });
+
+  if (!booking) {
+    return res.status(404).send({ message: "Booking not found" });
+  }
+
+  if (booking.status !== "confirmed") {
+    return res.status(409).send({ message: "Booking is not confirmed" });
+  }
+
+  const endTime = new Date(`${booking.date}T${booking.endTime}:00`);
+
+  if (new Date() <= endTime) {
+    return res.status(400).send({ message: "Booking time is not over yet" });
+  }
+
+  const result = await studioBookingCollection.updateOne(
+    { _id: new ObjectId(id), status: "confirmed" },
+    {
+      $set: {
+        status: "completed",
+        completedAt: new Date(),
+      },
+    }
+  );
+
+  if (!result.modifiedCount) {
+    return res.status(409).send({ message: "Booking already processed" });
+  }
+
+  res.send({ message: "Booking completed successfully" });
+});
 
 
 app.get("/studios/hero", async (req, res) => {
