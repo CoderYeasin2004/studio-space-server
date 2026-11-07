@@ -15,6 +15,7 @@ app.use(
 );
 app.use(express.json())
 
+// Health check endpoint
 app.get("/",(req, res) =>  {
 res.send("Hello World!")
 })
@@ -37,7 +38,9 @@ const connectClient = await connectToMongoDB();
 const db = connectClient.db("studio-space-server");
 const studiosCollection = db.collection("studios");
 const studioBookingCollection = db.collection("bookings")
+const reviewsCollection = db.collection("reviews");
 
+// Create a new studio
 app.post("/studios", async (req, res) => {
   const result = await studiosCollection.insertOne({
     ...req.body,
@@ -49,6 +52,129 @@ app.post("/studios", async (req, res) => {
 });
 
 
+
+
+// Submit a review for a completed studio booking
+app.post("/studios/:id/reviews", async (req, res) => {
+  const { id } = req.params;
+  const { bookingId, author, rating, text } = req.body;
+
+  if (
+    !ObjectId.isValid(id) ||
+    !ObjectId.isValid(bookingId) ||
+    !author?.trim() ||
+    !Number.isInteger(Number(rating)) ||
+    Number(rating) < 1 ||
+    Number(rating) > 5 ||
+    !text?.trim()
+  ) {
+    return res.send({ message: "Invalid review" });
+  }
+
+  const booking = await studioBookingCollection.findOne({
+    _id: new ObjectId(bookingId),
+    studioId: id,
+    status: "completed",
+    reviewSubmitted: { $ne: true },
+  });
+
+  if (!booking) {
+    return res.send({
+      message: "No eligible booking found or already reviewed",
+    });
+  }
+
+  const result = await studioBookingCollection.updateOne(
+    {
+      _id: new ObjectId(bookingId),
+      status: "completed",
+      reviewSubmitted: { $ne: true },
+    },
+    {
+      $set: { reviewSubmitted: true },
+    }
+  );
+
+  if (result.modifiedCount !== 1) {
+    return res.send({ message: "Booking already reviewed" });
+  }
+
+  const review = {
+    studioId: new ObjectId(id),
+    bookingId: new ObjectId(bookingId),
+    author: author.trim(),
+    role: "Customer",
+    avatar: "",
+    rating: Number(rating),
+    date: new Date(),
+    text: text.trim(),
+    createdAt: new Date(),
+  };
+
+  const inserted = await reviewsCollection.insertOne(review);
+
+  const reviews = await reviewsCollection
+    .find({ studioId: new ObjectId(id) })
+    .toArray();
+
+  const averageRating = Number(
+    (
+      reviews.reduce((sum, item) => sum + item.rating, 0) /
+      reviews.length
+    ).toFixed(1)
+  );
+
+  await studiosCollection.updateOne(
+    { _id: new ObjectId(id) },
+    {
+      $set: {
+        rating: averageRating,
+        reviewCount: reviews.length,
+      },
+    }
+  );
+
+  res.send({
+    message: "Review submitted successfully",
+    review: {
+      id: inserted.insertedId.toString(),
+      author: review.author,
+      role: review.role,
+      avatar: review.avatar,
+      rating: review.rating,
+      date: review.date,
+      text: review.text,
+    },
+  });
+});
+
+
+
+
+// Check review eligibility based on a completed booking
+app.get("/studios/:id/review-eligibility", async (req, res) => {
+  const { id } = req.params;
+  const email = req.query.email?.trim().toLowerCase();
+
+  if (!ObjectId.isValid(id) || !email) {
+    return res.send({ eligible: false });
+  }
+
+  const booking = await studioBookingCollection.findOne({
+    studioId: id,
+    customerEmail: email,
+    status: "completed",
+    reviewSubmitted: { $ne: true },
+  });
+
+  res.send({
+    eligible: !!booking,
+    bookingId: booking?._id.toString() || null,
+  });
+});
+
+
+// Get studios owned by a user email
 app.get("/my-studios/:email", async (req, res) => {
   const email = req.params.email;
 
@@ -64,6 +190,7 @@ app.get("/my-studios/:email", async (req, res) => {
   );
 });
 
+// Get bookings for studios owned by a user email
 app.get("/my-studio-bookings/:email", async (req, res) => {
   const { email } = req.params;
 
@@ -92,11 +219,12 @@ app.get("/my-studio-bookings/:email", async (req, res) => {
   );
 });
 
+// Delete a studio booking by ID
 app.delete("/studios/booking/:id", async (req, res) => {
   const { id } = req.params;
 
   if (!ObjectId.isValid(id)) {
-    return res.status(400).send({ message: "Invalid booking ID" });
+    return res.send({ message: "Invalid booking ID" });
   }
 
   const result = await studioBookingCollection.deleteOne({
@@ -104,7 +232,7 @@ app.delete("/studios/booking/:id", async (req, res) => {
   });
 
   if (!result.deletedCount) {
-    return res.status(404).send({ message: "Booking not found" });
+    return res.send({ message: "Booking not found" });
   }
 
   res.send(result);
@@ -112,11 +240,12 @@ app.delete("/studios/booking/:id", async (req, res) => {
 
 
 
+// Confirm a pending studio booking
 app.patch("/studios/booking/:id/confirm", async (req, res) => {
   const { id } = req.params;
 
   if (!ObjectId.isValid(id)) {
-    return res.status(400).send({ message: "Invalid ID" });
+    return res.send({ message: "Invalid ID" });
   }
 
   const result = await studioBookingCollection.updateOne(
@@ -130,33 +259,33 @@ app.patch("/studios/booking/:id/confirm", async (req, res) => {
   );
 
   if (!result.matchedCount) {
-    return res.status(404).send({ message: "Booking not found" });
+    return res.send({ message: "Booking not found" });
   }
 
   res.send(result);
 });
 
-app.get("/studios/booking", async (req, res) => {
-  try {
-    const bookings = await studioBookingCollection.find({}).toArray();
 
-    res.send(
-      bookings.map(({ _id, ...booking }) => ({
-        ...booking,
-        id: _id.toString(),
-      }))
-    );
-  } catch (error) {
-    console.error(error);
-    res.status(500).send({ message: "Failed to fetch bookings" });
-  }
+
+
+// Get all studio bookings
+app.get("/studios/booking", async (req, res) => {
+  const bookings = await studioBookingCollection.find({}).toArray();
+
+  res.send(
+    bookings.map(({ _id, ...booking }) => ({
+      ...booking,
+      id: _id.toString(),
+    }))
+  );
 });
 
+// Update a studio by ID
 app.patch("/studios/:id", async (req, res) => {
   const { id } = req.params;
 
   if (!ObjectId.isValid(id)) {
-    return res.status(400).send({ message: "Invalid ID" });
+    return res.send({ message: "Invalid ID" });
   }
 
   const result = await studiosCollection.updateOne(
@@ -173,11 +302,12 @@ app.patch("/studios/:id", async (req, res) => {
 });
 
 
+// Delete a studio by ID
 app.delete("/studios/:id", async (req, res) => {
   const { id } = req.params;
 
   if (!ObjectId.isValid(id)) {
-    return res.status(400).send({
+    return res.send({
       message: "Invalid studio ID",
     });
   }
@@ -192,10 +322,11 @@ app.delete("/studios/:id", async (req, res) => {
   });
 });
 
+// Create a new studio booking
 app.post("/studios/booking", async (req, res) => {
-  const { studioId, date, startTime, endTime } = req.body;
+  const { studioId, date, startTime, endTime, customerEmail } = req.body;
 
-  // Validate booking
+  const email = customerEmail?.trim().toLowerCase();
   const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
 
   if (
@@ -203,27 +334,24 @@ app.post("/studios/booking", async (req, res) => {
     !date ||
     !timePattern.test(startTime) ||
     !timePattern.test(endTime) ||
-    startTime >= endTime
+    startTime >= endTime ||
+    !email
   ) {
-    return res.status(400).send({ message: "Invalid booking details" });
+    return res.send({ message: "Invalid booking details" });
   }
 
   const session = client.startSession();
 
-  try {
-    await session.withTransaction(async () => {
-      // Lock the studio to prevent simultaneous bookings
+  const result = await session
+    .withTransaction(async () => {
       const lock = await studiosCollection.updateOne(
         { _id: new ObjectId(studioId), status: "live" },
         { $inc: { bookingVersion: 1 } },
         { session }
       );
 
-      if (!lock.matchedCount) {
-        throw new Error("STUDIO_NOT_FOUND");
-      }
+      if (!lock.matchedCount) return "STUDIO_NOT_FOUND";
 
-      // Check existing booking
       const existing = await studioBookingCollection.findOne(
         {
           studioId,
@@ -235,48 +363,42 @@ app.post("/studios/booking", async (req, res) => {
         { session }
       );
 
-      if (existing) {
-        throw new Error("BOOKING_EXISTS");
-      }
+      if (existing) return "BOOKING_EXISTS";
 
-      // Save booking
       await studioBookingCollection.insertOne(
         {
           ...req.body,
+          customerEmail: email,
+          reviewSubmitted: false,
           status: "pending",
           createdAt: new Date(),
         },
         { session }
       );
-    });
 
-    res.status(201).send({ message: "Booking successful" });
+      return "SUCCESS";
+    })
+    .finally(() => session.endSession());
 
-  } catch (error) {
-    if (error.message === "BOOKING_EXISTS") {
-      return res.status(409).send({
-        message: "This time slot is already booked",
-      });
-    }
-
-    if (error.message === "STUDIO_NOT_FOUND") {
-      return res.status(404).send({
-        message: "Studio not available",
-      });
-    }
-
-    res.status(500).send({ message: "Booking failed" });
-
-  } finally {
-    await session.endSession();
+  if (result === "STUDIO_NOT_FOUND") {
+    return res.send({ message: "Studio not available" });
   }
+
+  if (result === "BOOKING_EXISTS") {
+    return res.send({
+      message: "This time slot is already booked",
+    });
+  }
+
+  res.send({ message: "Booking successful" });
 });
 
+// Get booked time slots for a studio
 app.get("/studios/:id/availability", async (req, res) => {
   const { id } = req.params;
 
   if (!ObjectId.isValid(id)) {
-    return res.status(400).send({
+    return res.send({
       message: "Invalid studio ID",
     });
   }
@@ -297,11 +419,12 @@ app.get("/studios/:id/availability", async (req, res) => {
   res.send(bookings);
 });
 
+// Mark a confirmed booking as completed
 app.patch("/studios/booking/:id/complete", async (req, res) => {
   const { id } = req.params;
 
   if (!ObjectId.isValid(id)) {
-    return res.status(400).send({ message: "Invalid ID" });
+    return res.send({ message: "Invalid ID" });
   }
 
   const booking = await studioBookingCollection.findOne({
@@ -309,17 +432,17 @@ app.patch("/studios/booking/:id/complete", async (req, res) => {
   });
 
   if (!booking) {
-    return res.status(404).send({ message: "Booking not found" });
+    return res.send({ message: "Booking not found" });
   }
 
   if (booking.status !== "confirmed") {
-    return res.status(409).send({ message: "Booking is not confirmed" });
+    return res.send({ message: "Booking is not confirmed" });
   }
 
   const endTime = new Date(`${booking.date}T${booking.endTime}:00`);
 
   if (new Date() <= endTime) {
-    return res.status(400).send({ message: "Booking time is not over yet" });
+    return res.send({ message: "Booking time is not over yet" });
   }
 
   const result = await studioBookingCollection.updateOne(
@@ -333,13 +456,14 @@ app.patch("/studios/booking/:id/complete", async (req, res) => {
   );
 
   if (!result.modifiedCount) {
-    return res.status(409).send({ message: "Booking already processed" });
+    return res.send({ message: "Booking already processed" });
   }
 
   res.send({ message: "Booking completed successfully" });
 });
 
 
+// Get the top-rated hero studio
 app.get("/studios/hero", async (req, res) => {
   const studio = await studiosCollection
     .find({
@@ -370,6 +494,7 @@ app.get("/studios/hero", async (req, res) => {
 
 
 
+// Get studio counts grouped by category
 app.get("/stats/categories", async (req, res) => {
   const result = await studiosCollection
     .aggregate([
@@ -383,61 +508,79 @@ app.get("/stats/categories", async (req, res) => {
   );
 });
 
+// Get reviews for a studio
+app.get("/studios/:id/reviews", async (req, res) => {
+  const { id } = req.params;
+
+  if (!ObjectId.isValid(id)) return res.send([]);
+
+  const reviews = await reviewsCollection
+    .find({ studioId: new ObjectId(id) })
+    .sort({ createdAt: -1 })
+    .toArray();
+
+  res.send(
+    reviews.map(({ _id, author, role, avatar, rating, date, text }) => ({
+      id: _id.toString(),
+      author,
+      role,
+      avatar,
+      rating,
+      date,
+      text,
+    }))
+  );
+});
 
 
+// Get a studio by slug or ID
 app.get("/studios/:slug", async (req, res) => {
-  try {
-    const { slug } = req.params;
+  const { slug } = req.params;
 
-    const isObjectId = /^[0-9a-fA-F]{24}$/.test(slug);
+  const isObjectId = /^[0-9a-fA-F]{24}$/.test(slug);
 
-    const filter = isObjectId
-      ? { _id: new ObjectId(slug) }
-      : { slug };
+  const filter = isObjectId
+    ? { _id: new ObjectId(slug) }
+    : { slug };
 
-    const studio = await studiosCollection.findOne(filter);
+  const studio = await studiosCollection.findOne(filter);
 
-    if (!studio) {
-      return res.status(404).send({
-        message: "Studio not found",
-      });
-    }
-
-    res.send({
-      ...studio,
-      id: studio._id.toString(),
-    });
-  } catch {
-    res.status(500).send({
-      message: "Internal server error",
+  if (!studio) {
+    return res.send({
+      message: "Studio not found",
     });
   }
+
+  res.send({
+    ...studio,
+    id: studio._id.toString(),
+  });
 });
 
 
 
+// Get all live studios
 app.get("/studios", async (req, res) => {
-  try {
-    const limitParam = req.query.limit;
+  const limitParam = req.query.limit;
 
-    let limitValue = null;
-    if (limitParam !== undefined) {
-      const parsed = parseInt(limitParam, 10);
-      if (isNaN(parsed) || parsed <= 0) {
-        return res.status(400).send({
-          message: "Invalid limit parameter. Must be a positive integer.",
-        });
-      }
-      limitValue = parsed;
-    }
-
-    let query = studiosCollection
-      .find({ status: "live" })
-      .sort({
-        rating: -1,
-        reviewCount: -1,
-        createdAt: -1,
+  let limitValue = null;
+  if (limitParam !== undefined) {
+    const parsed = parseInt(limitParam, 10);
+    if (isNaN(parsed) || parsed <= 0) {
+      return res.send({
+        message: "Invalid limit parameter. Must be a positive integer.",
       });
+    }
+    limitValue = parsed;
+  }
+
+  let query = studiosCollection
+    .find({ status: "live" })
+    .sort({
+      rating: -1,
+      reviewCount: -1,
+      createdAt: -1,
+    });
 
     if (limitValue !== null) {
       query = query.limit(limitValue);
@@ -446,14 +589,9 @@ app.get("/studios", async (req, res) => {
     const result = await query.toArray();
 
     res.send(result);
-  } catch (error) {
-    console.error("Failed to fetch studios:", error);
-    res.status(500).send({
-      message: "Failed to fetch studios",
-    });
-  }
 });
 
+// Get overall platform statistics
 app.get("/stats", async (req, res) => {
   const studios = await studiosCollection
     .find({ status: "live" })
