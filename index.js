@@ -295,6 +295,53 @@ app.get("/studios/:id/availability", async (req, res) => {
   res.send(bookings);
 });
 
+
+
+app.get("/studios/hero", async (req, res) => {
+  const studio = await studiosCollection
+    .find({
+      status: "live",
+      rating: { $gte: 4.5 },
+      reviewCount: { $gt: 0 },
+    })
+    .sort({
+      reviewCount: -1,
+      rating: -1,
+      createdAt: -1,
+    })
+    .limit(1)
+    .next();
+
+  if (studio) {
+    return res.send(studio);
+  }
+
+  const latestStudio = await studiosCollection
+    .find({ status: "live" })
+    .sort({ createdAt: -1 })
+    .limit(1)
+    .next();
+
+  res.send(latestStudio || null);
+});
+
+
+
+app.get("/stats/categories", async (req, res) => {
+  const result = await studiosCollection
+    .aggregate([
+      { $match: { status: "live" } },
+      { $group: { _id: "$category", count: { $sum: 1 } } },
+    ])
+    .toArray();
+
+  res.send(
+    Object.fromEntries(result.map(({ _id, count }) => [_id, count])),
+  );
+});
+
+
+
 app.get("/studios/:slug", async (req, res) => {
   try {
     const { slug } = req.params;
@@ -325,10 +372,70 @@ app.get("/studios/:slug", async (req, res) => {
 });
 
 
+
 app.get("/studios", async (req, res) => {
-const result = await studiosCollection.find().toArray();
-res.send(result)
+  try {
+    const limitParam = req.query.limit;
+
+    let limitValue = null;
+    if (limitParam !== undefined) {
+      const parsed = parseInt(limitParam, 10);
+      if (isNaN(parsed) || parsed <= 0) {
+        return res.status(400).send({
+          message: "Invalid limit parameter. Must be a positive integer.",
+        });
+      }
+      limitValue = parsed;
+    }
+
+    let query = studiosCollection
+      .find({ status: "live" })
+      .sort({
+        rating: -1,
+        reviewCount: -1,
+        createdAt: -1,
+      });
+
+    if (limitValue !== null) {
+      query = query.limit(limitValue);
+    }
+
+    const result = await query.toArray();
+
+    res.send(result);
+  } catch (error) {
+    console.error("Failed to fetch studios:", error);
+    res.status(500).send({
+      message: "Failed to fetch studios",
+    });
+  }
 });
+
+app.get("/stats", async (req, res) => {
+  const studios = await studiosCollection
+    .find({ status: "live" })
+    .toArray();
+
+  const cities = new Set(
+    studios.map((studio) => studio.city?.trim().toLowerCase()).filter(Boolean),
+  );
+
+  const ratings = studios
+    .map((studio) => studio.rating)
+    .filter((rating) => typeof rating === "number");
+
+  res.send({
+    totalStudios: studios.length,
+    totalCities: cities.size,
+    averageRating: ratings.length
+      ? Number(
+          (ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length).toFixed(1),
+        )
+      : null,
+  });
+});
+
+
 
 export async function disconnectFromMongoDB() {
   await client.close();
