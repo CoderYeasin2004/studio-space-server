@@ -17,7 +17,7 @@ app.use(express.json());
 
 // Health check endpoint
 app.get("/", (req, res) => {
-  res.send("Hello World!");
+  res.send("Server Is running File!");
 });
 
 const client = new MongoClient(process.env.MONGO_URI);
@@ -50,7 +50,7 @@ const verifyToken = async (req, res, next) => {
   const token = authHeader.split(" ")[1];
 
   const JWKS = createRemoteJWKSet(
-    new URL("http://localhost:3000/api/auth/jwks"),
+    new URL(`${process.env.CLIENT_URL}/api/auth/jwks`),
   );
 
   try {
@@ -756,3 +756,5 @@ export async function disconnectFromMongoDB() {
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+
+export default app
