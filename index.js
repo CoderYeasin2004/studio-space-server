@@ -252,13 +252,14 @@ app.get("/my-studio-bookings/:email", verifyToken, async (req, res) => {
   const studioSlugs = studios.map((studio) => studio.slug).filter(Boolean);
 
   const bookings = await studioBookingCollection
-    .find({
-      $or: [
-        { studioId: { $in: studioIds } },
-        { studioSlug: { $in: studioSlugs } },
-      ],
-    })
-    .toArray();
+  .find({
+    $or: [
+      { customerEmail: email },
+      { studioId: { $in: studioIds } },
+      { studioSlug: { $in: studioSlugs } },
+    ],
+  })
+  .toArray();
 
   res.send(
     bookings.map(({ _id, ...booking }) => ({
@@ -267,7 +268,7 @@ app.get("/my-studio-bookings/:email", verifyToken, async (req, res) => {
     })),
   );
 });
-
+disconnectFromMongoDB
 // Delete a studio booking by ID
 app.delete("/studios/booking/:id", verifyToken, async (req, res) => {
   const { id } = req.params;
@@ -344,17 +345,7 @@ app.patch("/studios/booking/:id/confirm", verifyToken, async (req, res) => {
   res.send(result);
 });
 
-// Get all studio bookings
-// app.get("/studios/booking", async (req, res) => {
-//   const bookings = await studioBookingCollection.find({}).toArray();
 
-//   res.send(
-//     bookings.map(({ _id, ...booking }) => ({
-//       ...booking,
-//       id: _id.toString(),
-//     }))
-//   );
-// });
 
 // Update a studio by ID
 app.patch("/studios/:id", verifyToken, async (req, res) => {
